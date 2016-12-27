@@ -144,10 +144,12 @@ class CaptioningRNN(object):
 
     # (3)
     if self.cell_type == 'rnn':
-      rnn, rnn_cache = rnn_forward(embeddings, hidden_state, Wx, Wh, b)
+      net, cache = rnn_forward(embeddings, hidden_state, Wx, Wh, b)
+    elif self.cell_type == 'lstm':
+      net, cache = lstm_forward(embeddings, hidden_state, Wx, Wh, b)
 
     # (4)
-    temporal_affine, temporal_affine_cache = temporal_affine_forward(rnn, W_vocab, b_vocab)
+    temporal_affine, temporal_affine_cache = temporal_affine_forward(net, W_vocab, b_vocab)
 
     # (5)
     loss, dout = temporal_softmax_loss(temporal_affine, captions_out, mask)
@@ -157,7 +159,9 @@ class CaptioningRNN(object):
     dh, grads['W_vocab'], grads['b_vocab'] = temporal_affine_backward(dout, temporal_affine_cache)
 
     if self.cell_type == 'rnn':
-      dembeddings, dhidden, grads['Wx'], grads['Wh'], grads['b'] = rnn_backward(dh, rnn_cache)
+      dembeddings, dhidden, grads['Wx'], grads['Wh'], grads['b'] = rnn_backward(dh, cache)
+    elif self.cell_type == 'lstm':
+      dembeddings, dhidden, grads['Wx'], grads['Wh'], grads['b'] = lstm_backward(dh, cache)
 
     grads['W_embed'] = word_embedding_backward(dembeddings, embeddings_cache)
 
@@ -224,7 +228,23 @@ class CaptioningRNN(object):
     # functions; you'll need to call rnn_step_forward or lstm_step_forward in #
     # a loop.                                                                 #
     ###########################################################################
-    pass
+    if self.cell_type == 'lstm':
+      cell_vec = np.zeros_like(features)
+
+    hidden_vec, _ = affine_forward(features, W_proj, b_proj)
+
+    word = np.ones((N, 1), dtype=np.int32) * self._start
+    for i in range(max_length):
+      wembed, _ = word_embedding_forward(word, W_embed)
+
+      if self.cell_type == 'rnn':
+        hidden_vec, _ = rnn_step_forward(wembed, hidden_vec, Wx, Wh, b)
+      elif self.cell_type == 'lstm':
+        hidden_vec, cell_vec, _ = lstm_step_forward(np.squeeze(wembed), hidden_vec, cell_vec, Wx, Wh, b)
+      word_scores, _ = temporal_affine_forward(hidden_vec.reshape((N,1,-1)), W_vocab, b_vocab)
+      word = np.argmax(np.squeeze(word_scores), axis=1)
+      captions[:, i] = word
+
     ############################################################################
     #                             END OF YOUR CODE                             #
     ############################################################################
